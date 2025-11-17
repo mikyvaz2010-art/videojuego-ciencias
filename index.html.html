@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Videojuego Escolar — Versión Pro</title>
+  <style>
+    :root{--primary:#4f46e5;--accent:#f59e0b;--bg:#0f172a;--card:#0b1220;--muted:#9aa4c0}
+    *{box-sizing:border-box}
+    body{margin:0;background:linear-gradient(180deg,#eef2ff 0%, #dbeafe 60%);font-family:Inter,system-ui,Arial,Helvetica,sans-serif;color:#0b1220}
+    .wrap{max-width:980px;margin:18px auto;padding:18px}
+    header{display:flex;justify-content:space-between;align-items:center}
+    h1{margin:0;font-size:20px}
+    .top-controls{display:flex;gap:8px}
+    #game-area{background:white;border-radius:12px;padding:18px;margin-top:12px;box-shadow:0 8px 30px rgba(15,23,42,0.08)}
+
+    .hud{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+    .left-hud{display:flex;gap:12px;align-items:center}
+    #lives{display:flex;gap:6px}
+    .life{width:18px;height:18px;background:#ef4444;border-radius:4px}
+
+    #score-balance{font-weight:600}
+    #level-select{display:flex;gap:6px}
+    .level{padding:6px 10px;border-radius:8px;background:#eef2ff;cursor:pointer}
+    .level.active{background:var(--primary);color:white}
+
+    #game-box{min-height:280px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:12px}
+    #question{font-size:18px;margin:12px 0;text-align:center}
+    #qimg{width:260px;height:150px;object-fit:cover;border-radius:10px;display:block}
+    #answers{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:10px}
+    .opt{min-width:160px;padding:10px;border-radius:10px;border:1px solid rgba(11,18,32,0.06);cursor:pointer;background:linear-gradient(180deg,#ffffff,#f8fafc);transition:transform .12s,box-shadow .12s}
+    .opt:active{transform:translateY(2px)}
+
+    /* animations */
+    .correct{box-shadow:0 6px 18px rgba(16,185,129,0.18);transform:scale(1.02);background:#dcfce7}
+    .wrong{animation:shake .36s; background:#fee2e2}
+    @keyframes shake{0%{transform:translateX(0)}25%{transform:translateX(-6px)}50%{transform:translateX(6px)}75%{transform:translateX(-4px)}100%{transform:translateX(0)}}
+
+    /* shop */
+    #shop{margin-top:14px;display:flex;gap:10px;justify-content:center}
+    .item{padding:8px 12px;border-radius:10px;background:#fff;border:1px solid #eef2ff}
+
+    /* canvas effects */
+    #fx-canvas{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:120}
+
+    footer{margin-top:14px;text-align:center;color:var(--muted)}
+    @media(max-width:600px){#qimg{width:100%;height:140px} .opt{min-width:140px}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Videojuego Escolar — Ciencias</h1>
+      <div class="top-controls">
+        <div id="score-balance">Puntos: <span id="points">0</span></div>
+        <div id="level-select">
+          <div class="level active" data-level="easy">Fácil</div>
+          <div class="level" data-level="normal">Normal</div>
+          <div class="level" data-level="hard">Difícil</div>
+        </div>
+      </div>
+    </header>
+
+    <section id="game-area">
+      <div class="hud">
+        <div class="left-hud">
+          <div id="lives"></div>
+          <div id="status">Vidas: <strong id="life-count">3</strong></div>
+        </div>
+        <div id="controls">
+          <button id="startBtn">Iniciar</button>
+          <button id="pauseBtn" style="display:none">Pausar</button>
+        </div>
+      </div>
+
+      <div id="game-box">
+        <div id="progress" style="height:10px;width:0;background:var(--primary);border-radius:5px;margin-bottom:10px;transition:width .25s"></div>
+        <div id="question">Presiona "Iniciar" para jugar</div>
+        <img id="qimg" src="" alt="" style="display:none" />
+        <div id="answers"></div>
+        <div id="shop" style="display:none">
+          <div class="item">Comprar 1 vida - 50 pts <button data-cost="50" data-action="buy-life">Comprar</button></div>
+          <div class="item">Pistas (3) - 30 pts <button data-cost="30" data-action="buy-hint">Comprar</button></div>
+        </div>
+      </div>
+
+      <div style="text-align:center;margin-top:12px">
+        <button id="open-shop">Abrir Tienda</button>
+      </div>
+    </section>
+
+    <footer>
+      Hecho para clases — temas: modelos atómicos, unidades, densidad, mezclas, propiedades, configuración electrónica.
+    </footer>
+  </div>
+
+  <canvas id="fx-canvas"></canvas>
+
+<script>
+// ----------------------------------
+// Recursos (audios)
+// ----------------------------------
+const sndCorrect = new Audio('https://cdn.pixabay.com/download/audio/2022/03/15/audio_7f0b0b77a1.mp3?filename=correct-2-46134.mp3');
+const sndWrong = new Audio('https://cdn.pixabay.com/download/audio/2022/03/15/audio_31e2d037ec.mp3?filename=wrong-answer-129254.mp3');
+const sndWin = new Audio('https://cdn.pixabay.com/download/audio/2021/08/04/audio_0a6f2334f9.mp3?filename=applause-1-6297.mp3');
+
+// ----------------------------------
+// Banco grande de preguntas (variedad y niveles)
+// type: multi (opciones), vf (verdadero/falso)
+// difficulty: easy/normal/hard
+// ----------------------------------
+const QUESTIONS = [
+  {type:'multi',level:'easy',q:'¿Qué modelo atómico introduce niveles de energía?',a:['Dalton','Bohr','Thomson','Rutherford'],c:1,img:'https://i.imgur.com/Zg8YV1F.png'},
+  {type:'multi',level:'easy',q:'La unidad del tiempo en el SI es:',a:['Hora','Minuto','Segundo','Milisegundo'],c:2,img:'https://i.imgur.com/6FjF0Oe.png'},
+  {type:'vf',level:'easy',q:'El modelo de Thomson se conoce como "budín de pasas".',c:true,img:'https://i.imgur.com/Zg8YV1F.png'},
+  {type:'multi',level:'easy',q:'La densidad se calcula como:',a:['volumen/masa','masa/volumen','masa+volumen','masa·volumen'],c:1,img:'https://i.imgur.com/VrQZqql.png'},
+  {type:'multi',level:'normal',q:'¿Cuál es la unidad básica de masa en el SI?',a:['Gramo','Centímetro','Kilogramo','Newton'],c:2,img:'https://i.imgur.com/6FjF0Oe.png'},
+  {type:'multi',level:'normal',q:'¿Cuál mezcla es heterogénea?',a:['Agua con sal','Aire','Granola','Vinagre'],c:2,img:'https://i.imgur.com/S6OpfWk.png'},
+  {type:'vf',level:'normal',q:'Una mezcla homogénea tiene una sola fase.',c:true,img:'https://i.imgur.com/S6OpfWk.png'},
+  {type:'multi',level:'normal',q:'¿Qué propiedad describe qué tan fácil se raya un material?',a:['Dureza','Elasticidad','Conductividad','Masa'],c:0,img:'https://i.imgur.com/oq6x5pC.png'},
+  {type:'multi',level:'hard',q:'Configuración electrónica del Oxígeno (Z=8):',a:['1s2 2s2 2p4','1s2 2s2 2p6','1s2 2p6 2s2','1s2 2s1 2p5'],c:0,img:'https://i.imgur.com/CU5s8c0.png'},
+  {type:'multi',level:'hard',q:'En el modelo cuántico, los electrones se describen como:',a:['Partículas sólidas','Nubes de probabilidad','Órbitas fijas','Campos magnéticos'],c:1,img:'https://i.imgur.com/Zg8YV1F.png'},
+  {type:'vf',level:'hard',q:'Los electrones tienen carga positiva.',c:false,img:'https://i.imgur.com/CU5s8c0.png'},
+  // más preguntas para variedad
+  {type:'multi',level:'easy',q:'¿Cuál es una unidad de volumen?',a:['Litro','Newton','Kelvin','Joule'],c:0,img:'https://i.imgur.com/6FjF0Oe.png'},
+  {type:'multi',level:'normal',q:'¿Qué es una sustancia pura?',a:['Composición fija','Mezcla con varias fases','Sustancia con separadores','Siempre líquida'],c:0},
+  {type:'vf',level:'easy',q:'La masa es una propiedad general de la materia.',c:true},
+  {type:'multi',level:'hard',q:'¿Cuál es la partícula subatómica con carga positiva?',a:['Electrón','Protón','Neutrón','Fotón'],c:1},
+  {type:'multi',level:'normal',q:'¿Qué mide la densidad?',a:['La masa por unidad de volumen','La masa total','El volumen dividido por la masa','La temperatura'],c:0},
+  {type:'vf',level:'normal',q:'La configuración electrónica sigue el principio de Aufbau.',c:true}
+];
+
+// ----------------------------------
+// Estado del juego
+// ----------------------------------
+let level = 'easy';
+let questionPool = [];
+let qIndex = 0; let points = 0; let lives = 3; let hints = 0; let inPlay = false;
+
+// elementos DOM
+const el = {
+  startBtn: document.getElementById('startBtn'),
+  pauseBtn: document.getElementById('pauseBtn'),
+  question: document.getElementById('question'),
+  qimg: document.getElementById('qimg'),
+  answers: document.getElementById('answers'),
+  progress: document.getElementById('progress'),
+  points: document.getElementById('points'),
+  livesWrap: document.getElementById('lives'),
+  lifeCount: document.getElementById('life-count'),
+  shop: document.getElementById('shop'),
+  openShop: document.getElementById('open-shop')
+};
+
+// FX canvas
+const fx = document.getElementById('fx-canvas');
+const fxCtx = fx.getContext ? fx.getContext('2d') : null;
+fx.width = innerWidth; fx.height = innerHeight;
+window.addEventListener('resize', ()=>{fx.width = innerWidth; fx.height = innerHeight});
+
+// Partículas simples para confeti
+let particles = [];
+function spawnConfetti(x,y){
+  for(let i=0;i<30;i++) particles.push({x,y,vx:(Math.random()-0.5)*6,vy:(Math.random()-1.5)*6,life:60+Math.random()*40,color:['#f43f5e','#fb923c','#f59e0b','#10b981'][Math.floor(Math.random()*4)]});
+}
+function tickFX(){
+  if(!fxCtx) return; fxCtx.clearRect(0,0,fx.width,fx.height);
+  particles.forEach(p=>{p.x+=p.vx; p.y+=p.vy; p.vy+=0.18; p.life--; fxCtx.fillStyle=p.color; fxCtx.fillRect(p.x,p.y,4,6);});
+  particles = particles.filter(p=>p.life>0);
+  requestAnimationFrame(tickFX);
+}
+requestAnimationFrame(tickFX);
+
+// util
+function shuffle(a){return a.sort(()=>Math.random()-0.5)}
+
+// nivel selector
+document.querySelectorAll('.level').forEach(elBtn=>elBtn.addEventListener('click',()=>{
+  document.querySelectorAll('.level').forEach(x=>x.classList.remove('active'));
+  elBtn.classList.add('active'); level = elBtn.dataset.level;
+}));
+
+// mostrar vidas
+function renderLives(){
+  el.livesWrap.innerHTML='';
+  for(let i=0;i<lives;i++){const d=document.createElement('div');d.className='life';el.livesWrap.appendChild(d)}
+  el.lifeCount.innerText = lives;
+}
+renderLives();
+
+// preparar pool según nivel
+function preparePool(){
+  questionPool = QUESTIONS.filter(q=>q.level===level || level==='normal' && (q.level==='easy' || q.level==='normal') || level==='easy' && q.level==='easy');
+  // if hard selected, include normal+hard
+  if(level==='normal') questionPool = QUESTIONS.filter(q=>q.level!=='hard' ? true : Math.random()<0.35);
+  if(level==='hard') questionPool = QUESTIONS.filter(q=>q.level!=='easy');
+  questionPool = shuffle(questionPool);
+}
+
+// iniciar juego
+el.startBtn.addEventListener('click', ()=>{
+  if(inPlay) return; inPlay=true; points=0; lives=3; hints=0; renderLives(); updatePoints(); preparePool(); qIndex=0; showQuestion();
+});
+
+function updatePoints(){ el.points.innerText = points }
+
+function showQuestion(){
+  if(qIndex>=questionPool.length) return winGame();
+  const q = questionPool[qIndex];
+  el.question.innerText = q.q; el.answers.innerHTML = '';
+  if(q.img){ el.qimg.src = q.img; el.qimg.style.display='block'} else el.qimg.style.display='none';
+
+  if(q.type==='multi'){
+    q.a.forEach((txt,i)=>{
+      const b=document.createElement('div'); b.className='opt'; b.innerText=txt; b.addEventListener('click',()=>answer(i===q.c,b)); el.answers.appendChild(b);
+    });
+  }else if(q.type==='vf'){
+    const bt=document.createElement('div'); bt.className='opt'; bt.innerText='Verdadero'; bt.addEventListener('click',()=>answer(q.c===true,bt));
+    const bf=document.createElement('div'); bf.className='opt'; bf.innerText='Falso'; bf.addEventListener('click',()=>answer(q.c===false,bf));
+    el.answers.appendChild(bt); el.answers.appendChild(bf);
+  }
+  el.progress.style.width = ((qIndex/questionPool.length)*100)+'%';
+}
+
+function answer(correct, btn){
+  // disable all
+  document.querySelectorAll('#answers .opt').forEach(b=>b.style.pointerEvents='none');
+  if(correct){ btn.classList.add('correct'); sndCorrect.play(); points += (level==='easy'?10:level==='normal'?15:25); spawnConfetti(innerWidth/2,innerHeight/3); }
+  else{ btn.classList.add('wrong'); sndWrong.play(); lives--; renderLives(); if(lives<=0) return loseGame(); }
+  updatePoints();
+  setTimeout(()=>{ qIndex++; showQuestion(); },900);
+}
+
+function winGame(){ inPlay=false; sndWin.play(); el.question.innerText = `¡Felicidades! Ganaste. Puntos: ${points}`; spawnConfetti(innerWidth/2,innerHeight/3); el.progress.style.width='100%'; }
+function loseGame(){ inPlay=false; el.question.innerText = `Has perdido. Puntos: ${points}`; el.answers.innerHTML=''; el.qimg.style.display='none'; spawnConfetti(innerWidth/2,innerHeight/3); }
+
+// tienda
+el.openShop.addEventListener('click',()=>{ el.shop.style.display = el.shop.style.display==='none'?'flex':'none' });
+el.shop.addEventListener('click', (e)=>{
+  const btn = e.target.closest('button'); if(!btn) return; const cost = Number(btn.dataset.cost); const action = btn.dataset.action;
+  if(points<cost){ alert('No tienes suficientes puntos'); return }
+  points -= cost; updatePoints();
+  if(action==='buy-life'){ lives++; renderLives(); }
+  if(action==='buy-hint'){ hints += 3; alert('Compraste 3 pistas (no implementadas visualmente)'); }
+});
+
+// quick keyboard: H para pista, S para shop
+window.addEventListener('keydown',(e)=>{ if(e.key.toLowerCase()==='s') el.openShop.click(); if(e.key.toLowerCase()==='h') alert('Pista pedida (si hay)') });
+
+// expose for debugging
+window._GAME = { QUESTIONS, preparePool, showQuestion };
+
+</script>
+</body>
+</html>
